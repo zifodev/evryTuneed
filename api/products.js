@@ -90,6 +90,12 @@ const detailLines = html => String(html || "")
   .split("\n").map(t => t.replace(/\s+/g, " ").trim()).filter(t => t.length > 1).slice(0, 8).map(t => t.slice(0, 140));
 
 export default async function handler(req, res) {
+  // Parse the request URL ourselves with the WHATWG URL API instead of touching req.query —
+  // reading req.query triggers Vercel's Node runtime to fall back to the legacy, deprecated
+  // url.parse() (Node's DEP0169 warning) the first time that getter is accessed.
+  const requestUrl = new URL(req.url, "http://localhost");
+  const debug = requestUrl.searchParams.has("debug");
+
   // tolerate stray spaces, line breaks or quotes picked up when pasting the keys into Vercel
   const clean = v => String(v || "").trim().replace(/^["']+|["']+$/g, "").trim();
   const key = clean(process.env.DROPSHIP_API_KEY);
@@ -138,7 +144,7 @@ export default async function handler(req, res) {
       batch.forEach(d => { if (d) raw.push(...pickList(d)); });
     }
 
-    if (req.query && req.query.debug) {
+    if (debug) {
       // connection check: shows how many products came back and one raw example (no keys)
       res.setHeader("Cache-Control", "no-store");
       const categories = {};
@@ -214,7 +220,7 @@ export default async function handler(req, res) {
     res.status(200).json({ products, count: products.length, fashionCount: fashion.length, updatedAt: new Date().toISOString() });
   } catch (err) {
     const out = { error: "Could not load supplier products.", detail: String(err && err.message || err) };
-    if (req.query && req.query.debug) {
+    if (debug) {
       if (err && err.body) out.supplierSays = err.body;
       // which keys the site is really sending: lengths here, a short fingerprint only in the private Vercel logs
       const raw = { apiKey: String(process.env.DROPSHIP_API_KEY || ""), secretKey: String(process.env.DROPSHIP_SECRET_KEY || "") };
@@ -223,7 +229,7 @@ export default async function handler(req, res) {
       const h = v => createHash("sha256").update(v).digest("hex").slice(0, 16);
       console.log(`[products] key check api=${fp(key)} #${h(key)} secret=${fp(secret)} #${h(secret)}`);
     }
-    res.setHeader("Cache-Control", req.query && req.query.debug ? "no-store" : "s-maxage=60");
+    res.setHeader("Cache-Control", debug ? "no-store" : "s-maxage=60");
     res.status(502).json(out);
   }
 }
